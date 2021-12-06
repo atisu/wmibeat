@@ -1,26 +1,26 @@
 package beater
 
 import (
-	"fmt"
-	"time"
-	"strings"
 	"bytes"
+	"fmt"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
 
+	"github.com/eskibars/wmibeat/config"
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
-	"github.com/eskibars/wmibeat/config"
 )
 
 type Wmibeat struct {
-	beatConfig   *config.Config
-	done         chan struct{}
-	period       time.Duration
+	beatConfig *config.Config
+	done       chan struct{}
+	period     time.Duration
 }
 
 // Creates beater
@@ -61,15 +61,15 @@ func (bt *Wmibeat) Setup(b *beat.Beat) error {
 
 func (bt *Wmibeat) Run(b *beat.Beat) error {
 	logp.Info("wmibeat is running! Hit CTRL-C to stop it.")
-	
-	ticker := time.NewTicker(bt.period)	
+
+	ticker := time.NewTicker(bt.period)
 	for {
 		select {
 		case <-bt.done:
 			return nil
 		case <-ticker.C:
 		}
-		
+
 		ole.CoInitialize(0)
 		wmiscriptObj, err := oleutil.CreateObject("WbemScripting.SWbemLocator")
 		if err != nil {
@@ -87,7 +87,7 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 		defer wmiqi.Release()
 		service := serviceObj.ToIDispatch()
 		defer serviceObj.Clear()
-		
+
 		var allValues common.MapStr
 		for _, class := range bt.beatConfig.Wmibeat.Classes {
 			if len(class.Fields) > 0 {
@@ -114,15 +114,15 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 				}
 				count := int(countObj.Val)
 				defer countObj.Clear()
-				
-				var classValues interface {} = nil
-				
-				if (class.ObjectTitle != "") {
+
+				var classValues interface{} = nil
+
+				if class.ObjectTitle != "" {
 					classValues = common.MapStr{}
 				} else {
 					classValues = []common.MapStr{}
 				}
-				for i :=0; i < count; i++ {
+				for i := 0; i < count; i++ {
 					rowObj, err := oleutil.CallMethod(result, "ItemIndex", i)
 					if err != nil {
 						return err
@@ -133,32 +133,32 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 					var objectTitle = ""
 					for _, j := range wmiFields {
 						wmiObj, err := oleutil.GetProperty(row, j)
-						
+
 						if err != nil {
 							return err
 						}
 						var objValue = wmiObj.Value()
-						if (class.ObjectTitle == j) {
+						if class.ObjectTitle == j {
 							objectTitle = objValue.(string)
 						}
-						rowValues = common.MapStrUnion(rowValues, common.MapStr { j: objValue } )
+						rowValues = common.MapStrUnion(rowValues, common.MapStr{j: objValue})
 						defer wmiObj.Clear()
-						
+
 					}
-					if (class.ObjectTitle != "") {
-						if (objectTitle != "") {
-							classValues =  common.MapStrUnion(classValues.(common.MapStr), common.MapStr { objectTitle: rowValues })
+					if class.ObjectTitle != "" {
+						if objectTitle != "" {
+							classValues = common.MapStrUnion(classValues.(common.MapStr), common.MapStr{objectTitle: rowValues})
 						} else {
-							classValues =  common.MapStrUnion(classValues.(common.MapStr), common.MapStr { strconv.Itoa(i): rowValues })
+							classValues = common.MapStrUnion(classValues.(common.MapStr), common.MapStr{strconv.Itoa(i): rowValues})
 						}
 					} else {
 						classValues = append(classValues.([]common.MapStr), rowValues)
 					}
 					rowValues = nil
 				}
-				allValues = common.MapStrUnion(allValues, common.MapStr { class.Class: classValues })
+				allValues = common.MapStrUnion(allValues, common.MapStr{class.Class: classValues})
 				classValues = nil
-				
+
 			} else {
 				var errorString bytes.Buffer
 				errorString.WriteString("No fields defined for class ")
@@ -167,12 +167,78 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 				logp.Warn(errorString.String())
 			}
 		}
+
+		for _, namespace := range bt.beatConfig.Wmibeat.Namespaces {
+			logp.Info("Namespace: root\\" + namespace.Namespace)
+			nsServiceObj, err := oleutil.CallMethod(wmiqi, "ConnectServer", "localhost",
+				"root\\"+namespace.Namespace)
+			if err != nil {
+				return err
+			}
+			nsService := nsServiceObj.ToIDispatch()
+			defer serviceObj.Clear()
+
+			var query bytes.Buffer
+			metricNameFields := namespace.MetricNameCombinedFields
+			var allWMIFields []string = append(metricNameFields, namespace.MetricValueField)
+			query.WriteString("SELECT ")
+			query.WriteString(strings.Join(allWMIFields, ","))
+			query.WriteString(" FROM ")
+			query.WriteString(namespace.Class)
+			if namespace.WhereClause != "" {
+				query.WriteString(" WHERE ")
+				query.WriteString(namespace.WhereClause)
+			}
+			logp.Info("Query: " + query.String())
+			resultObj, err := oleutil.CallMethod(nsService, "ExecQuery", query.String())
+			if err != nil {
+				return err
+			}
+			result := resultObj.ToIDispatch()
+			defer resultObj.Clear()
+			countObj, err := oleutil.GetProperty(result, "Count")
+			if err != nil {
+				return err
+			}
+			count := int(countObj.Val)
+			defer countObj.Clear()
+			logp.Info("Count: " + strconv.Itoa(count))
+
+			for i := 0; i < count; i++ {
+				rowObj, err := oleutil.CallMethod(result, "ItemIndex", i)
+				if err != nil {
+					return err
+				}
+				row := rowObj.ToIDispatch()
+				defer rowObj.Clear()
+
+				var objectTitle = namespace.Namespace + "_" + namespace.Class
+				var metricValue = ""
+				for _, j := range allWMIFields {
+					wmiObj, err := oleutil.GetProperty(row, j)
+					if err != nil {
+						return err
+					}
+					var objValue = wmiObj.Value()
+					if j != namespace.MetricValueField {
+						objectTitle = fmt.Sprintf("%s_%v", objectTitle, objValue)
+					} else {
+						metricValue = fmt.Sprintf("%v", objValue)
+					}
+					defer wmiObj.Clear()
+				}
+				objectTitle = strings.ReplaceAll(strings.ReplaceAll(objectTitle, " ", ""), "#", "")
+				logp.Info(objectTitle + " = " + metricValue)
+				allValues = common.MapStrUnion(allValues, common.MapStr{objectTitle: metricValue})
+			}
+		}
+
 		ole.CoUninitialize()
 
 		event := common.MapStr{
 			"@timestamp": common.Time(time.Now()),
 			"type":       b.Name,
-			"wmi":    allValues,
+			"wmi":        allValues,
 		}
 		b.Events.PublishEvent(event)
 		logp.Info("Event sent")
