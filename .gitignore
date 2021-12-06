@@ -6,3 +6,6 @@
 /wmibeat
 /wmibeat.test
 *.pyc
+
+wmibeat.exe
+wmibeat.yml
