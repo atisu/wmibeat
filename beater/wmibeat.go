@@ -173,7 +173,8 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 			nsServiceObj, err := oleutil.CallMethod(wmiqi, "ConnectServer", "localhost",
 				"root\\"+namespace.Namespace)
 			if err != nil {
-				return err
+				logp.Err("Cannot connect to namespace `" + namespace.Namespace + "`, skipping it.")
+				continue
 			}
 			nsService := nsServiceObj.ToIDispatch()
 			defer serviceObj.Clear()
@@ -192,13 +193,15 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 			logp.Info("Query: " + query.String())
 			resultObj, err := oleutil.CallMethod(nsService, "ExecQuery", query.String())
 			if err != nil {
-				return err
+				logp.Err("Cannot exec query in current namespace, skipping it.")
+				continue
 			}
 			result := resultObj.ToIDispatch()
 			defer resultObj.Clear()
 			countObj, err := oleutil.GetProperty(result, "Count")
 			if err != nil {
-				return err
+				logp.Err("Cannot get `Count` property, skipping current namespace.")
+				continue
 			}
 			count := int(countObj.Val)
 			defer countObj.Clear()
@@ -207,17 +210,21 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 			for i := 0; i < count; i++ {
 				rowObj, err := oleutil.CallMethod(result, "ItemIndex", i)
 				if err != nil {
-					return err
+					logp.Err("Cannot fetch ItemIndex, skipping it.")
+					continue
 				}
 				row := rowObj.ToIDispatch()
 				defer rowObj.Clear()
 
 				var objectTitle = namespace.Namespace + "_" + namespace.Class
 				var metricValue = ""
+				var hasError int = 0
 				for _, j := range allWMIFields {
 					wmiObj, err := oleutil.GetProperty(row, j)
 					if err != nil {
-						return err
+						logp.Err("Cannot get `Count` property for row, skipping it.")
+						hasError = 1
+						break
 					}
 					var objValue = wmiObj.Value()
 					if j != namespace.MetricValueField {
@@ -227,9 +234,11 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 					}
 					defer wmiObj.Clear()
 				}
-				objectTitle = strings.ReplaceAll(strings.ReplaceAll(objectTitle, " ", ""), "#", "")
-				logp.Info(objectTitle + " = " + metricValue)
-				allValues = common.MapStrUnion(allValues, common.MapStr{objectTitle: metricValue})
+				if hasError == 0 {
+					objectTitle = strings.ReplaceAll(strings.ReplaceAll(objectTitle, " ", ""), "#", "")
+					logp.Info(objectTitle + " = " + metricValue)
+					allValues = common.MapStrUnion(allValues, common.MapStr{objectTitle: metricValue})
+				}
 			}
 		}
 
