@@ -22,7 +22,7 @@ namespaces:
 - `namespace` sets the namespace to connect to.
 - `class` defines the class within the namespace.
 - The values of the fields defined in `metric_name_combined_fields` will be combined and used as the name of the metric (with the addition of the namespace and class and the WMIBeat specific prefix). For example, the values above will produce `<namespace>_<class>_<Name>_<SensorType>`, e.g., `wmibeat_wmi_OpenHardwareMonitor_Sensor_CPUCore1_Load`. Spaces and '#' are removed from metric names.
-- `metric_valu_field` contains the name of the field from where the value should be fetched. In case of OpenHardwareMonitor this is `Value`.
+- `metric_value_field` contains the name of the field from where the value should be fetched. In case of OpenHardwareMonitor this is `Value`.
 - `whereclause` acts the same as in the original WMIbeat.
 
 ## Compiling
