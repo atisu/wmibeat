@@ -37,7 +37,7 @@ func (bt *Wmibeat) Config(b *beat.Beat) error {
 	// Load beater beatConfig
 	err := cfgfile.Read(&bt.beatConfig, "")
 	if err != nil {
-		return fmt.Errorf("Error reading config file: %v", err)
+		return fmt.Errorf("error reading config file: %v", err)
 	}
 
 	return nil
@@ -101,16 +101,18 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 					query.WriteString(" WHERE ")
 					query.WriteString(class.WhereClause)
 				}
-				logp.Info("Query: " + query.String())
+				logp.Info("query: " + query.String())
 				resultObj, err := oleutil.CallMethod(service, "ExecQuery", query.String())
 				if err != nil {
-					return err
+					logp.Err("cannot query class `" + class.Class + "`")
+					continue
 				}
 				result := resultObj.ToIDispatch()
 				defer resultObj.Clear()
 				countObj, err := oleutil.GetProperty(result, "Count")
 				if err != nil {
-					return err
+					logp.Err("cannot query count property for class `" + class.Class + "`")
+					continue
 				}
 				count := int(countObj.Val)
 				defer countObj.Clear()
@@ -125,17 +127,21 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 				for i := 0; i < count; i++ {
 					rowObj, err := oleutil.CallMethod(result, "ItemIndex", i)
 					if err != nil {
-						return err
+						logp.Err("cannot call ItemIndex for class `" + class.Class + "`")
+						continue
 					}
 					row := rowObj.ToIDispatch()
 					defer rowObj.Clear()
 					var rowValues common.MapStr
 					var objectTitle = ""
+					var hasError int = 0
 					for _, j := range wmiFields {
 						wmiObj, err := oleutil.GetProperty(row, j)
 
 						if err != nil {
-							return err
+							logp.Err("cannot get property for class `" + class.Class + "`")
+							hasError = 1
+							break
 						}
 						var objValue = wmiObj.Value()
 						if class.ObjectTitle == j {
@@ -145,14 +151,16 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 						defer wmiObj.Clear()
 
 					}
-					if class.ObjectTitle != "" {
-						if objectTitle != "" {
-							classValues = common.MapStrUnion(classValues.(common.MapStr), common.MapStr{objectTitle: rowValues})
+					if hasError == 0 {
+						if class.ObjectTitle != "" {
+							if objectTitle != "" {
+								classValues = common.MapStrUnion(classValues.(common.MapStr), common.MapStr{objectTitle: rowValues})
+							} else {
+								classValues = common.MapStrUnion(classValues.(common.MapStr), common.MapStr{strconv.Itoa(i): rowValues})
+							}
 						} else {
-							classValues = common.MapStrUnion(classValues.(common.MapStr), common.MapStr{strconv.Itoa(i): rowValues})
+							classValues = append(classValues.([]common.MapStr), rowValues)
 						}
-					} else {
-						classValues = append(classValues.([]common.MapStr), rowValues)
 					}
 					rowValues = nil
 				}
@@ -173,7 +181,7 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 			nsServiceObj, err := oleutil.CallMethod(wmiqi, "ConnectServer", "localhost",
 				"root\\"+namespace.Namespace)
 			if err != nil {
-				logp.Err("Cannot connect to namespace `" + namespace.Namespace + "`, skipping it.")
+				logp.Err("cannot connect to namespace `" + namespace.Namespace + "`, skipping it.")
 				continue
 			}
 			nsService := nsServiceObj.ToIDispatch()
@@ -193,24 +201,24 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 			logp.Info("Query: " + query.String())
 			resultObj, err := oleutil.CallMethod(nsService, "ExecQuery", query.String())
 			if err != nil {
-				logp.Err("Cannot exec query in current namespace, skipping it.")
+				logp.Err("cannot exec query in current namespace, skipping it.")
 				continue
 			}
 			result := resultObj.ToIDispatch()
 			defer resultObj.Clear()
 			countObj, err := oleutil.GetProperty(result, "Count")
 			if err != nil {
-				logp.Err("Cannot get `Count` property, skipping current namespace.")
+				logp.Err("cannot get `Count` property, skipping current namespace.")
 				continue
 			}
 			count := int(countObj.Val)
 			defer countObj.Clear()
-			logp.Info("Count: " + strconv.Itoa(count))
+			logp.Info("count: " + strconv.Itoa(count))
 
 			for i := 0; i < count; i++ {
 				rowObj, err := oleutil.CallMethod(result, "ItemIndex", i)
 				if err != nil {
-					logp.Err("Cannot fetch ItemIndex, skipping it.")
+					logp.Err("cannot fetch ItemIndex, skipping it.")
 					continue
 				}
 				row := rowObj.ToIDispatch()
@@ -222,7 +230,7 @@ func (bt *Wmibeat) Run(b *beat.Beat) error {
 				for _, j := range allWMIFields {
 					wmiObj, err := oleutil.GetProperty(row, j)
 					if err != nil {
-						logp.Err("Cannot get `Count` property for row, skipping it.")
+						logp.Err("cannot get `Count` property for row, skipping it.")
 						hasError = 1
 						break
 					}
