@@ -1,5 +1,7 @@
 # WMIbeat-OHM
 
+**!!! OBSOLETE -- Use wmibeat-ohm2 instead**
+
 This is an extended version of WMIbeat, mainly for supporting OpenHardwareMonitor style metrics from WMI. However, it is more general, it allows connecting to custom namespaces and retrieveing metrics, using a bit different configuration format.
 
 From the section "WMIbeat" the original README is kept, only the following subsection(s) are for the customization.
